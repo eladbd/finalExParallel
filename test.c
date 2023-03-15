@@ -80,14 +80,14 @@ int main(int argc, char *argv[]) {
         printf("total: %d\n", totalObjectsSize);
         // MPI_Bcast(buffer, totalObjectsSize, MPI_INT, 0, MPI_COMM_WORLD);
         MPI_Bcast(buffer, totalObjectsSize, MPI_INT, 0, MPI_COMM_WORLD);
-        master_job(0,size,pictures,picturesLineSize,numPictures);
+        MPI_Bcast(picturesLineSize, numPictures, MPI_INT, 0, MPI_COMM_WORLD);
+        master_job(0, size, pictures, picturesLineSize, numPictures);
 
     } else {
         MPI_Status status;
         int rec;
         int numObjects;
         MPI_Recv(&numObjects, 1, MPI_INT, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
-
         MPI_Bcast(&numObjects, 1, MPI_INT, 0, MPI_COMM_WORLD);
         int *objectsLineSize = (int *)malloc(sizeof(int) * numObjects);
         MPI_Bcast(objectsLineSize, numObjects, MPI_INT, 0, MPI_COMM_WORLD);
@@ -326,11 +326,48 @@ void free3DArray(int ***array, int x, int *y) {
 void worker_job(int size, int mpi_size) {
     int rank;
     MPI_Status status;
+    int rec;
+    int numObjects;
+    MPI_Recv(&numObjects, 1, MPI_INT, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
+    MPI_Bcast(&numObjects, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    int *objectsLineSize = (int *)malloc(sizeof(int) * numObjects);
+    MPI_Bcast(objectsLineSize, numObjects, MPI_INT, 0, MPI_COMM_WORLD);
+    int ***objects = (int ***)malloc(numObjects * sizeof(int **));
+    int totalObjectsSize = 0;
+    for (int i = 0; i < numObjects; i++) {
+        totalObjectsSize += objectsLineSize[i] * objectsLineSize[i];
+        objects[i] = (int **)malloc(objectsLineSize[i] * sizeof(int *));
+        for (int j = 0; j < objectsLineSize[i]; j++) {
+            objects[i][j] = (int *)malloc(objectsLineSize[i] * sizeof(int));
+        }
+
+        // printf("objects array: %d\n", objectsLineSize[i]);
+    }
+    totalObjectsSize = totalObjectsSize * numObjects;
+    int *buffer = (int *)malloc(totalObjectsSize * sizeof(int));
+    MPI_Bcast(buffer, totalObjectsSize, MPI_INT, 0, MPI_COMM_WORLD);
+    // totalObjectsSize *= numObjects;
+    // printf("total worker: %d\n", buffer[0]);
+    int count = 0;
+    for (int i = 0; i < numObjects; i++) {
+        for (int j = 0; j < objectsLineSize[i]; j++) {
+            for (int k = 0; k < objectsLineSize[i]; k++) {
+                objects[i][j][k] = buffer[count];
+                count++;
+            }
+        }
+    }
+
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-    int data[2];
-    MPI_Recv(data, 2, MPI_INT, 0, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
+    int pictureSize;
+    MPI_Recv(&pictureSize, 1, MPI_INT, 0, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
+    int **picture = (int *)malloc(pictureSize * sizeof(int *));
+    for (int i = 0; i < pictureSize; i++) {
+        picture[i] = (int)malloc(pictureSize * sizeof(int));
+    }
+    MPI_Recv(picture, pictureSize * pictureSize, MPI_INT, 0, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
     while (status.MPI_TAG == DATA_TAG) {  // wait for new job
-        double answer = heavy(data[0], data[1]);
+                                          // parallel for job
         MPI_Send(&answer, 1, MPI_DOUBLE, 0, rank, MPI_COMM_WORLD);
         MPI_Recv(data, 2, MPI_INT, 0, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
     }
