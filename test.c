@@ -5,8 +5,9 @@
 #include <string.h>
 #include <time.h>
 
-#define TERMINATE_TAG 0
+#define TERMINATE_TAG -1
 #define DATA_TAG 1
+#define NUM_OF_RESULTS_FROM_WORKER 10
 
 int ***readFromFileTo3DArray(FILE *fp, int, int *);
 void free3DArray(int ***array, int x, int *y);
@@ -57,10 +58,7 @@ int main(int argc, char *argv[]) {
 
         int found[numObjects];
         int *positions[numObjects];
-        // MPI_Send(&numObjects, 1, MPI_INT, 1, DATA_TAG, MPI_COMM_WORLD);
-        // for (int i = 2; i < size; i++) {
-        //     MPI_Send(&numObjects, 1, MPI_INT, i, TERMINATE_TAG, MPI_COMM_WORLD);
-        // }
+
         // Send objects to all workers.
         MPI_Bcast(&numObjects, 1, MPI_INT, 0, MPI_COMM_WORLD);
         MPI_Bcast(objectsLineSize, numObjects, MPI_INT, 0, MPI_COMM_WORLD);
@@ -82,13 +80,14 @@ int main(int argc, char *argv[]) {
         printf("total: %d\n", totalObjectsSize);
         // MPI_Bcast(buffer, totalObjectsSize, MPI_INT, 0, MPI_COMM_WORLD);
         MPI_Bcast(buffer, totalObjectsSize, MPI_INT, 0, MPI_COMM_WORLD);
+        master_job(0,size,pictures,picturesLineSize,numPictures);
 
     } else {
         MPI_Status status;
         int rec;
         int numObjects;
         MPI_Recv(&numObjects, 1, MPI_INT, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
-        
+
         MPI_Bcast(&numObjects, 1, MPI_INT, 0, MPI_COMM_WORLD);
         int *objectsLineSize = (int *)malloc(sizeof(int) * numObjects);
         MPI_Bcast(objectsLineSize, numObjects, MPI_INT, 0, MPI_COMM_WORLD);
@@ -228,39 +227,33 @@ int main(int argc, char *argv[]) {
 
 //     return 0;
 // }
-// double master_job(int size, int mpi_size) {  // master send to each worker a (x,y)
-//     MPI_Status status;
-//     double answer = 0;
-//     int counter = 0, x = 0, y = 0;
-//     for (int i = 1; i < mpi_size; i++) {
-//         int data[2] = {x, y};
-//         MPI_Send(data, 2, MPI_INT, i, DATA_TAG, MPI_COMM_WORLD);
-//         counter++, y++;
-//         if (y == size) {
-//             y = 0, x++;
-//         }
-//         if (x == size) {
-//             break;
-//         }
-//     }
-//     double res = 0;
-//     do {  // wait for worker to finish job and send new job or if finished task send TERMINATE
-//         MPI_Recv(&res, 1, MPI_DOUBLE, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
-//         counter--;
-//         if (x < size) {
-//             int data[2] = {x, y};
-//             MPI_Send(data, 2, MPI_INT, status.MPI_SOURCE, DATA_TAG, MPI_COMM_WORLD);
-//             counter++, y++;
-//             if (y == size) {
-//                 y = 0, x++;
-//             }
-//         } else {  // send terminate
-//             MPI_Send(NULL, 0, MPI_INT, status.MPI_SOURCE, TERMINATE_TAG, MPI_COMM_WORLD);
-//         }
-//         answer += res;
-//     } while (counter > 0);
-//     return answer;
-// }
+void master_job(int size, int mpi_size, int ***pictures, int *picturesLineSize, int numOfPictures) {  // master send to each worker a (x,y)
+    MPI_Status status;
+    int counter = 0;
+    int picIndex = 0;
+    for (int i = 1; i < mpi_size; i++) {
+        MPI_Send(pictures[picIndex], picturesLineSize[picIndex] * picturesLineSize[picIndex], MPI_INT, i, picIndex, MPI_COMM_WORLD);
+        counter++;
+        picIndex++;
+        if (picIndex == numOfPictures) {
+            break;
+        }
+    }
+    int res[NUM_OF_RESULTS_FROM_WORKER];
+    // numobjects + 1
+    /// 1 PIC  8 objects -  [true/false,0,0,0,0,0,0,0,0,0]
+    do {  // wait for worker to finish job and send new job or if finished task send TERMINATE
+        MPI_Recv(res, NUM_OF_RESULTS_FROM_WORKER, MPI_INT, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
+        counter--;
+        if (picIndex < numOfPictures) {
+            MPI_Send(pictures[picIndex], picturesLineSize[picIndex] * picturesLineSize[picIndex], MPI_INT, status.MPI_SOURCE, picIndex, MPI_COMM_WORLD);
+            counter++, picIndex++;
+        } else {  // send terminate
+            MPI_Send(NULL, 0, MPI_INT, status.MPI_SOURCE, TERMINATE_TAG, MPI_COMM_WORLD);
+        }
+        // write to file
+    } while (counter > 0);
+}
 
 int ***readFromFileTo3DArray(FILE *file, int size, int *elementSizeToUpdate) {
     int id, elementSize;
